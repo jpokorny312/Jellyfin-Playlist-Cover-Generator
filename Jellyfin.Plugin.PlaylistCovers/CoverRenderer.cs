@@ -10,7 +10,7 @@ namespace Jellyfin.Plugin.PlaylistCovers;
 /// Renders a streaming-style 16:9 cover. Title and logos sit in the centred square so that
 /// clients cropping playlists to 1:1 still show the complete cover.
 /// </summary>
-public static class CoverRenderer
+public static partial class CoverRenderer
 {
     /// <summary>Canvas width.</summary>
     public const int Width = 1920;
@@ -65,8 +65,8 @@ public static class CoverRenderer
         var shots = backdrops.Take(3).ToList();
         var accent = DominantColor(shots);
 
-        using var background = Background(shots);
-        var result = Grade(background, accent);
+        using var background = Background(shots, Width, Height);
+        var result = Grade(background, accent, Width, Height);
 
         using var canvas = new SKCanvas(result);
         using var typeface = LoadTypeface(fontPath);
@@ -136,7 +136,7 @@ public static class CoverRenderer
         return string.Join("  ·  ", parts);
     }
 
-    private static SKTypeface LoadTypeface(string? fontPath)
+    internal static SKTypeface LoadTypeface(string? fontPath)
     {
         if (!string.IsNullOrWhiteSpace(fontPath) && File.Exists(fontPath))
         {
@@ -161,9 +161,9 @@ public static class CoverRenderer
         return SKTypeface.FromFamilyName(null, SKFontStyle.Bold) ?? SKTypeface.Default;
     }
 
-    private static (SKFont Font, List<string> Lines) FitTitle(string text, SKTypeface typeface, int maxWidth)
+    internal static (SKFont Font, List<string> Lines) FitTitle(string text, SKTypeface typeface, int maxWidth, int maxSize = 150)
     {
-        for (var size = 150; size >= 58; size -= 6)
+        for (var size = maxSize; size >= 58; size -= 6)
         {
             var font = new SKFont(typeface, size) { Edging = SKFontEdging.SubpixelAntialias };
             var lines = Wrap(text, font, maxWidth);
@@ -206,32 +206,32 @@ public static class CoverRenderer
     }
 
     /// <summary>Scales and crops to fill the canvas (centre x, 40% y – keeps faces in frame).</summary>
-    private static SKBitmap CoverFit(SKBitmap src)
+    private static SKBitmap CoverFit(SKBitmap src, int dw, int dh, float focusY = 0.4f)
     {
-        var dst = new SKBitmap(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var dst = new SKBitmap(new SKImageInfo(dw, dh, SKColorType.Bgra8888, SKAlphaType.Premul));
         using var canvas = new SKCanvas(dst);
         canvas.Clear(SKColors.Black);
-        var scale = Math.Max((float)Width / src.Width, (float)Height / src.Height);
+        var scale = Math.Max((float)dw / src.Width, (float)dh / src.Height);
         var w = src.Width * scale;
         var h = src.Height * scale;
-        var x = (Width - w) * 0.5f;
-        var y = (Height - h) * 0.4f;
+        var x = (dw - w) * 0.5f;
+        var y = (dh - h) * focusY;
         using var paint = new SKPaint { IsAntialias = true };
         using var image = SKImage.FromBitmap(src);
         canvas.DrawImage(image, new SKRect(x, y, x + w, y + h), new SKSamplingOptions(SKCubicResampler.Mitchell), paint);
         return dst;
     }
 
-    private static SKBitmap Background(IReadOnlyList<SKBitmap> shots)
+    private static SKBitmap Background(IReadOnlyList<SKBitmap> shots, int dw, int dh)
     {
         if (shots.Count == 0)
         {
-            var flat = new SKBitmap(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+            var flat = new SKBitmap(new SKImageInfo(dw, dh, SKColorType.Bgra8888, SKAlphaType.Premul));
             flat.Erase(new SKColor(24, 24, 30));
             return flat;
         }
 
-        var layers = shots.Select(CoverFit).ToList();
+        var layers = shots.Select(s => CoverFit(s, dw, dh)).ToList();
         try
         {
             if (layers.Count == 1)
@@ -241,19 +241,19 @@ public static class CoverRenderer
 
             var n = layers.Count;
             var bytes = layers.Select(l => l.Bytes).ToList();
-            var result = new SKBitmap(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
-            var dst = new byte[Width * Height * 4];
+            var result = new SKBitmap(new SKImageInfo(dw, dh, SKColorType.Bgra8888, SKAlphaType.Premul));
+            var dst = new byte[dw * dh * 4];
 
             // Triangular weights centred on each panel give smooth cross-fades.
             var weights = new float[n][];
             for (var i = 0; i < n; i++)
             {
-                weights[i] = new float[Width];
+                weights[i] = new float[dw];
             }
 
-            for (var x = 0; x < Width; x++)
+            for (var x = 0; x < dw; x++)
             {
-                var fx = x / (float)(Width - 1);
+                var fx = x / (float)(dw - 1);
                 var total = 0f;
                 for (var i = 0; i < n; i++)
                 {
@@ -270,11 +270,11 @@ public static class CoverRenderer
                 }
             }
 
-            for (var y = 0; y < Height; y++)
+            for (var y = 0; y < dh; y++)
             {
-                for (var x = 0; x < Width; x++)
+                for (var x = 0; x < dw; x++)
                 {
-                    var o = ((y * Width) + x) * 4;
+                    var o = ((y * dw) + x) * 4;
                     float b = 0, g = 0, r = 0;
                     for (var i = 0; i < n; i++)
                     {
@@ -304,12 +304,12 @@ public static class CoverRenderer
     }
 
     /// <summary>Darkens, tints with the accent colour, adds vignette and bottom gradient.</summary>
-    private static SKBitmap Grade(SKBitmap background, SKColor accent)
+    private static SKBitmap Grade(SKBitmap background, SKColor accent, int dw, int dh, float blur = 3f)
     {
         // Slight blur so busy scenes don't fight with the text.
-        var blurred = new SKBitmap(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var blurred = new SKBitmap(new SKImageInfo(dw, dh, SKColorType.Bgra8888, SKAlphaType.Premul));
         using (var canvas = new SKCanvas(blurred))
-        using (var paint = new SKPaint { ImageFilter = SKImageFilter.CreateBlur(3, 3, SKShaderTileMode.Clamp) })
+        using (var paint = new SKPaint { ImageFilter = SKImageFilter.CreateBlur(blur, blur, SKShaderTileMode.Clamp) })
         using (var image = SKImage.FromBitmap(background))
         {
             canvas.DrawImage(image, 0, 0, new SKSamplingOptions(), paint);
@@ -318,18 +318,18 @@ public static class CoverRenderer
         var px = blurred.Bytes;
         float tr = accent.Red / 255f, tg = accent.Green / 255f, tb = accent.Blue / 255f;
 
-        for (var y = 0; y < Height; y++)
+        for (var y = 0; y < dh; y++)
         {
-            var ny = y / (float)Height;
+            var ny = y / (float)dh;
             var tintAmount = 0.10f + (0.32f * MathF.Pow(ny, 1.6f));
-            for (var x = 0; x < Width; x++)
+            for (var x = 0; x < dw; x++)
             {
-                var nx = (x - (Width / 2f)) / (Width / 2f);
+                var nx = (x - (dw / 2f)) / (dw / 2f);
                 var centre = MathF.Exp(-(nx * nx) * 2.2f);
                 var dim = 0.62f - (0.22f * centre);
                 var vig = 1f - (0.45f * Math.Clamp((nx * nx) + ((ny - 0.5f) * (ny - 0.5f) * 2f), 0f, 1f));
 
-                var o = ((y * Width) + x) * 4;
+                var o = ((y * dw) + x) * 4;
                 var b = px[o] / 255f * dim;
                 var g = px[o + 1] / 255f * dim;
                 var r = px[o + 2] / 255f * dim;
@@ -350,7 +350,7 @@ public static class CoverRenderer
     }
 
     /// <summary>Most vivid mid-tone hue across the images (ignores grey/black/white).</summary>
-    private static SKColor DominantColor(IReadOnlyList<SKBitmap> images)
+    internal static SKColor DominantColor(IReadOnlyList<SKBitmap> images)
     {
         var hueWeight = new double[12];
         var hueSum = new double[12];
@@ -427,9 +427,8 @@ public static class CoverRenderer
         return new SKColor((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
     }
 
-    private static void DrawLogoRow(SKCanvas canvas, IReadOnlyList<SKBitmap> logos, float yCenter)
+    internal static void DrawLogoRow(SKCanvas canvas, IReadOnlyList<SKBitmap> logos, float yCenter, int canvasWidth = Width, float limit = Safe - 160f, int boxW = 300, int boxH = 120)
     {
-        const int boxW = 300, boxH = 120;
         float gap = 56;
 
         var fitted = new List<(SKBitmap Bmp, float W, float H)>();
@@ -443,7 +442,6 @@ public static class CoverRenderer
         try
         {
             var total = fitted.Sum(f => f.W) + (gap * (fitted.Count - 1));
-            var limit = Safe - 160f;
             if (total > limit)
             {
                 var k = limit / total;
@@ -462,7 +460,7 @@ public static class CoverRenderer
                 ImageFilter = SKImageFilter.CreateDropShadow(0, 6, 12, 12, new SKColor(0, 0, 0, 180))
             };
 
-            var x = (Width - total) / 2f;
+            var x = (canvasWidth - total) / 2f;
             foreach (var (bmp, w, h) in fitted)
             {
                 using var image = SKImage.FromBitmap(bmp);
