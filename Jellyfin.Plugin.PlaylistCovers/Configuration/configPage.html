@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <title>Playlist Covers</title>
+</head>
+<body>
+<div id="PlaylistCoversConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="PlaylistCoversForm">
+                <h2>Playlist Covers</h2>
+                <p>Die Cover werden über Dashboard &rarr; Geplante Aufgaben &rarr; „Playlist-Cover erzeugen“ erstellt (täglich und beim Serverstart; dort auch manuell startbar).</p>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="ExcludePatterns">Playlists ausschließen (eine pro Zeile, * und ? erlaubt)</label>
+                    <textarea is="emby-textarea" id="ExcludePatterns" rows="5" style="width:100%"></textarea>
+                    <div class="fieldDescription">Hier eingetragene Playlists behalten ihr eigenes Cover.</div>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="FontPath">Schriftart (Pfad zu .ttf/.otf, optional)</label>
+                    <input is="emby-input" type="text" id="FontPath" />
+                    <div class="fieldDescription">Pfad auf dem Server, z. B. /config/fonts/Montserrat-Bold.ttf. Leer = Systemschrift.</div>
+                </div>
+
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input is="emby-checkbox" type="checkbox" id="UpperCaseTitle" />
+                        <span>Titel in Großbuchstaben</span>
+                    </label>
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Speichern</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '6f1c3a52-8d3e-4b7a-9a41-2c5e7d90b1f4';
+            var page = document.querySelector('#PlaylistCoversConfigPage');
+
+            page.addEventListener('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (cfg) {
+                    page.querySelector('#ExcludePatterns').value = cfg.ExcludePatterns || '';
+                    page.querySelector('#FontPath').value = cfg.FontPath || '';
+                    page.querySelector('#UpperCaseTitle').checked = cfg.UpperCaseTitle !== false;
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+            page.querySelector('#PlaylistCoversForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (cfg) {
+                    cfg.ExcludePatterns = page.querySelector('#ExcludePatterns').value;
+                    cfg.FontPath = page.querySelector('#FontPath').value;
+                    cfg.UpperCaseTitle = page.querySelector('#UpperCaseTitle').checked;
+                    ApiClient.updatePluginConfiguration(pluginId, cfg).then(Dashboard.processPluginConfigurationUpdateResult);
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>
