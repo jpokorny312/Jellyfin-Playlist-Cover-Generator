@@ -82,13 +82,18 @@ Projektaufbau:
 
 ### Release veröffentlichen
 
+Entweder per Tag:
+
 ```bash
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-Der Workflow `.github/workflows/release.yml` baut das Plugin, legt ein GitHub-Release mit ZIP und `manifest.json` an
-und hängt die neue Version an das bisherige Manifest an, sodass ältere Versionen installierbar bleiben.
+oder auf GitHub: **Releases → Draft a new release**, Tag `v0.2.0` neu anlegen, veröffentlichen.
+
+In beiden Fällen läuft `.github/workflows/release.yml`: Er baut das Plugin, hängt ZIP und `manifest.json` an das Release
+und ergänzt das bisherige Manifest um die neue Version, sodass ältere Versionen installierbar bleiben.
 Das Repository-Manifest ist immer unter `releases/latest/download/manifest.json` erreichbar.
+Die Versionsnummer kommt aus dem Tag (`v0.2.0` → `0.2.0.0`).
 
 ## Lizenzen
 

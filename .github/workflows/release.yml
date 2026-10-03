@@ -1,8 +1,9 @@
 name: Release
 
-# Push a tag like v0.2.0 to publish a plugin release.
-# Creates a GitHub release with the plugin ZIP and manifest.json; the manifest is the
-# Jellyfin plugin repository served at .../releases/latest/download/manifest.json.
+# Runs when a tag like v0.2.0 is created – by `git push origin v0.2.0` or by publishing a
+# new release with that tag in the GitHub UI. Attaches the plugin ZIP and manifest.json to
+# the release (creating it if needed); the manifest is the Jellyfin plugin repository served
+# at .../releases/latest/download/manifest.json.
 on:
   push:
     tags: ["v*"]
@@ -46,7 +47,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/playlist-covers_${VERSION}.zip" dist/manifest.json \
-            --title "Playlist Covers $GITHUB_REF_NAME" \
-            --notes "Plugin für Jellyfin 12.1. Installation: siehe README."
+          FILES=("dist/playlist-covers_${VERSION}.zip" dist/manifest.json)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${FILES[@]}" \
+              --title "Playlist Covers $GITHUB_REF_NAME" \
+              --notes "Plugin für Jellyfin 12.1. Installation: siehe README."
+          fi
