@@ -1,36 +1,96 @@
-# Jellyfin Playlist Cover Generator (Plugin)
+# Jellyfin Playlist Covers
 
-Jellyfin-Server-Plugin für Jellyfin **12.1** (.NET 10), das für Film-/Serien-Playlists
-hochwertige Cover im Streaming-Look erzeugt. Es läuft direkt im Server, ohne externes Tool.
+Plugin für den Jellyfin-Server, das für **Film- und Serien-Playlists** hochwertige Cover erzeugt – statt der
+zusammengewürfelten Standard-Collage. Es läuft direkt im Server, ohne externes Tool.
 
-- 16:9-Cover aus bis zu 3 Backdrops (weich überblendet), abgedunkelt und mit einer aus den Bildern berechneten Akzentfarbe getönt
-- Playlist-Name groß, darunter „12 Filme · 3 Serien“ und bis zu 3 Titel-Logos
-- Name und Logos liegen in der **quadratischen Mitte**: Clients mit 1:1-Zuschnitt (Handy) zeigen alles, am TV nutzt das Cover die volle Breite
-- Bei Serien/Episoden werden Backdrop und Logo der Serie verwendet
+<p>
+  <img src="docs/preview-marvel.jpg" width="220" alt="Beispiel: Marvel Filmreihe">
+  <img src="docs/preview-krimi.jpg" width="220" alt="Beispiel: Krimi Serien Abend">
+  <img src="docs/preview-familie.jpg" width="220" alt="Beispiel: Familienfilme">
+</p>
 
-## Installation
+> Die Beispiele oben sind mit Platzhalter-Postern gerendert. Im Betrieb verwendet das Plugin die echten Poster
+> der Titel aus deiner Bibliothek.
 
-```bash
-./build.sh            # benötigt das .NET-10-SDK → dist/playlist-covers_0.1.0.0.zip
-```
+## Funktionen
 
-ZIP-Inhalt (`Jellyfin.Plugin.PlaylistCovers.dll` + `meta.json`) in einen neuen Ordner
-`<Jellyfin-Datenordner>/plugins/PlaylistCovers_0.1.0.0/` entpacken und Jellyfin neu starten.
-Alternativ `dist/manifest.json` als eigenes Plugin-Repository hosten (`sourceUrl` anpassen)
-und unter Dashboard → Plugins → Repositories eintragen.
+- **Poster-Layout (2:3, Standard):** Die Poster der Titel als gestaffelter Stapel, der erste Titel der Playlist liegt vorne.
+  Darunter der Playlist-Name und die Anzahl der Filme und Serien. Hintergrund aus dem ersten Poster, abgedunkelt, mit dezenter Akzentfarbe.
+- **Querformat-Layout (16:9, optional):** Überblendete Backdrops, Name und bis zu drei Titel-Logos in der Bildmitte.
+- Bei Serien, Staffeln und Episoden wird das Poster der **Serie** verwendet.
+- Läuft als **geplante Aufgabe** (beim Serverstart und täglich um 04:00) und lässt sich jederzeit von Hand starten.
+  Es werden nur Playlists neu gerendert, deren Inhalt sich geändert hat – oder deren Cover von etwas anderem überschrieben wurde.
+- **Ausschlussmuster** für Playlists, die ihr eigenes Cover behalten sollen.
+- Eingebettete Schrift (Inter), keine Abhängigkeit von Systemschriften.
 
-## Benutzung
+## Voraussetzungen
 
-- Dashboard → Geplante Aufgaben → **Playlist-Cover erzeugen**: läuft beim Start und täglich um 04:00, manuell startbar.
-  Nur Playlists, deren Inhalt/Bilder sich geändert haben, werden neu gerendert.
-- Dashboard → Plugins → Playlist Covers: Ausschlussmuster (Playlists mit eigenem Cover), optionale Schrift, Groß-/Kleinschreibung.
+- Jellyfin **12.1** oder neuer
+- Playlists mit Filmen und/oder Serien, die Poster haben (Metadaten-Anbieter wie TMDb)
 
-## Schrift
-Ohne Angabe nimmt das Plugin Montserrat/Inter/DejaVu Sans/Liberation Sans, was auf dem Server vorhanden ist.
-Eigene Schrift: `.ttf` auf den Server legen und den Pfad in den Plugin-Einstellungen eintragen.
+## Installation (Plugin-Katalog)
+
+1. Jellyfin-Dashboard → **Plugins** → **Repositories** → **+**
+2. Eintragen:
+   - **Name:** `Playlist Covers`
+   - **URL:** `https://github.com/jpokorny312/Jellyfin-Playlist-Cover-Generator/releases/latest/download/manifest.json`
+3. Speichern, dann unter **Plugins → Katalog** nach **Playlist Covers** suchen und installieren.
+4. Jellyfin neu starten.
+5. Dashboard → **Geplante Aufgaben** → **Playlist-Cover erzeugen** → ▶ starten.
+
+Updates erscheinen danach ganz normal im Katalog.
+
+### Manuelle Installation
+
+ZIP aus dem [neuesten Release](https://github.com/jpokorny312/Jellyfin-Playlist-Cover-Generator/releases/latest)
+nach `<Jellyfin-Datenordner>/plugins/PlaylistCovers/` entpacken und Jellyfin neu starten.
+
+## Einstellungen
+
+Dashboard → **Plugins** → **Playlist Covers**
+
+| Einstellung | Bedeutung |
+|---|---|
+| Format | **Poster (2:3)** oder **Querformat (16:9)**. Nach einem Wechsel werden alle Cover beim nächsten Lauf neu erzeugt. |
+| Playlists ausschließen | Eine pro Zeile, `*` und `?` sind erlaubt (z. B. `Handgemacht*`). Diese Playlists behalten ihr Cover. |
+| Schriftart | Optional: Pfad zu einer `.ttf`/`.otf` auf dem Server. Leer = eingebettete Schrift (Inter). |
+| Titel in Großbuchstaben | Nur im Querformat. |
+
+## Hinweise
+
+- Das Plugin ersetzt das **Primärbild** der Playlist. Cover, die du von Hand gesetzt hast, werden überschrieben –
+  nimm solche Playlists in die Ausschlussliste auf.
+- Jellyfin erzeugt für Playlists selbst eine Collage. Sollte sie das Plugin-Cover nach einer Metadaten-Aktualisierung
+  ersetzen, erkennt das Plugin das beim nächsten Lauf und rendert neu.
+- Clients zeigen Poster meist im Format 2:3. Das Querformat wird je nach Client zugeschnitten; Name und Logos liegen
+  deshalb in der quadratischen Mitte.
 
 ## Entwicklung
 
+Voraussetzung: .NET-10-SDK.
+
 ```bash
-dotnet run --project Demo -c Release -- demo_out   # rendert Beispiel-Cover ohne Server
+./build.sh [version]                                # baut dist/playlist-covers_<version>.zip
+dotnet run --project Demo -c Release -- demo_out    # rendert Beispiel-Cover ohne Server
 ```
+
+Projektaufbau:
+
+- `Jellyfin.Plugin.PlaylistCovers/` – das Plugin (`CoverRenderer*.cs` = Rendering mit SkiaSharp, `PlaylistCoverService.cs` = Anbindung an Jellyfin)
+- `Demo/` – Konsolenprogramm, das Beispiel-Cover aus erfundenen Bildern rendert
+- `scripts/update_manifest.py` – pflegt das Plugin-Repository-Manifest
+
+### Release veröffentlichen
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Der Workflow `.github/workflows/release.yml` baut das Plugin, legt ein GitHub-Release mit ZIP und `manifest.json` an
+und hängt die neue Version an das bisherige Manifest an, sodass ältere Versionen installierbar bleiben.
+Das Repository-Manifest ist immer unter `releases/latest/download/manifest.json` erreichbar.
+
+## Lizenzen
+
+Die eingebettete Schrift **Inter** steht unter der SIL Open Font License 1.1
+(siehe `Jellyfin.Plugin.PlaylistCovers/Fonts/OFL-Inter.txt`).

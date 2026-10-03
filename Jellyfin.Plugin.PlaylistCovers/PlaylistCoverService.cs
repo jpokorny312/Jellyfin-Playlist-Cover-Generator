@@ -100,36 +100,71 @@ public class PlaylistCoverService
             return;
         }
 
-        var backdropPaths = PickBackdrops(children, 3);
-        var logoPaths = PickLogos(children, 3);
+        var usePoster = !string.Equals(config.Layout, "Landscape", StringComparison.OrdinalIgnoreCase);
+        var mainPaths = usePoster ? PickPosters(children, 4) : PickBackdrops(children, 3);
+        var logoPaths = usePoster ? new List<string>() : PickLogos(children, 3);
         var movies = children.Count(c => c is Movie);
         var series = children.Count(c => c is Series or Season or Episode);
 
-        var signature = Signature(playlist.Name, children, backdropPaths, logoPaths, config);
+        var signature = Signature(playlist.Name, children, mainPaths, logoPaths, config, usePoster);
         var key = playlist.Id.ToString("N");
-        if (!force && state.TryGetValue(key, out var old) && old == signature)
+
+        // Also compare the image currently attached to the playlist: if something else
+        // (e.g. Jellyfin's own collage generator) replaced our cover, render it again.
+        if (!force && state.TryGetValue(key, out var old) && old == signature + "#" + ImageMarker(playlist))
         {
             return;
         }
 
-        var backdrops = Load(backdropPaths);
+        var images = Load(mainPaths);
         var logos = Load(logoPaths);
         try
         {
-            var jpeg = CoverRenderer.RenderJpeg(playlist.Name, backdrops, logos, movies, series, config.FontPath, config.UpperCaseTitle);
+            var jpeg = usePoster
+                ? CoverRenderer.RenderPosterJpeg(playlist.Name, images, movies, series, config.FontPath)
+                : CoverRenderer.RenderJpeg(playlist.Name, images, logos, movies, series, config.FontPath, config.UpperCaseTitle);
             using var stream = new MemoryStream(jpeg);
             await _providerManager
                 .SaveImage(playlist, stream, "image/jpeg", ImageType.Primary, null, ct)
                 .ConfigureAwait(false);
             await playlist.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, ct).ConfigureAwait(false);
-            state[key] = signature;
-            _logger.LogInformation("Playlist Covers: cover updated for {Name}", playlist.Name);
+            state[key] = signature + "#" + ImageMarker(playlist);
+            _logger.LogInformation("Playlist Covers: cover updated for {Name} ({Layout})", playlist.Name, usePoster ? "poster" : "landscape");
         }
         finally
         {
-            backdrops.ForEach(b => b.Dispose());
+            images.ForEach(b => b.Dispose());
             logos.ForEach(b => b.Dispose());
         }
+    }
+
+    private static string ImageMarker(BaseItem item)
+    {
+        var info = item.GetImageInfo(ImageType.Primary, 0);
+        return info == null ? string.Empty : $"{info.Path}|{info.DateModified.Ticks}";
+    }
+
+    /// <summary>Posters of the titles; episodes and seasons use their series poster.</summary>
+    private static List<string> PickPosters(List<BaseItem> items, int max)
+    {
+        var all = items.Select(FindPoster).Where(p => p != null).Select(p => p!).Distinct().ToList();
+        return Spread(all, max);
+    }
+
+    private static string? FindPoster(BaseItem item)
+    {
+        var target = item;
+        if (item is Episode episode && episode.Series != null)
+        {
+            target = episode.Series;
+        }
+        else if (item is Season season && season.Series != null)
+        {
+            target = season.Series;
+        }
+
+        var info = target.GetImageInfo(ImageType.Primary, 0);
+        return info != null && !string.IsNullOrEmpty(info.Path) && File.Exists(info.Path) ? info.Path : null;
     }
 
     /// <summary>Spreads the picks across the playlist so the cover is not just the first three titles.</summary>
@@ -192,16 +227,20 @@ public class PlaylistCoverService
         return result;
     }
 
-    private static string Signature(string name, List<BaseItem> children, List<string> backdrops, List<string> logos, PluginConfiguration cfg)
+    private static string Signature(string name, List<BaseItem> children, List<string> images, List<string> logos, PluginConfiguration cfg, bool poster)
     {
         var sb = new StringBuilder();
-        sb.Append("v1|").Append(name).Append('|').Append(cfg.FontPath).Append('|').Append(cfg.UpperCaseTitle);
+        sb.Append("v2|").Append(poster ? "poster" : "landscape").Append('|').Append(name).Append('|').Append(cfg.FontPath);
+        if (!poster)
+        {
+            sb.Append('|').Append(cfg.UpperCaseTitle);
+        }
         foreach (var c in children.Take(200))
         {
             sb.Append('|').Append(c.Id.ToString("N"));
         }
 
-        foreach (var p in backdrops.Concat(logos))
+        foreach (var p in images.Concat(logos))
         {
             sb.Append('|').Append(p).Append(':').Append(File.GetLastWriteTimeUtc(p).Ticks);
         }

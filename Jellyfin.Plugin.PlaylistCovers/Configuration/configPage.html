@@ -5,12 +5,21 @@
     <title>Playlist Covers</title>
 </head>
 <body>
-<div id="PlaylistCoversConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+<div id="PlaylistCoversConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select,emby-textarea">
     <div data-role="content">
         <div class="content-primary">
             <form id="PlaylistCoversForm">
                 <h2>Playlist Covers</h2>
                 <p>Die Cover werden über Dashboard &rarr; Geplante Aufgaben &rarr; „Playlist-Cover erzeugen“ erstellt (täglich und beim Serverstart; dort auch manuell startbar).</p>
+
+                <div class="selectContainer">
+                    <label class="selectLabel" for="Layout">Format</label>
+                    <select is="emby-select" id="Layout" class="emby-select-withcolor emby-select">
+                        <option value="Poster">Poster (2:3) – die Poster der Titel als Stapel</option>
+                        <option value="Landscape">Querformat (16:9) – Backdrops und Logos</option>
+                    </select>
+                    <div class="fieldDescription">Nach einem Wechsel werden alle Cover beim nächsten Lauf der Aufgabe neu erzeugt.</div>
+                </div>
 
                 <div class="inputContainer">
                     <label class="inputLabel inputLabelUnfocused" for="ExcludePatterns">Playlists ausschließen (eine pro Zeile, * und ? erlaubt)</label>
@@ -27,7 +36,7 @@
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label class="emby-checkbox-label">
                         <input is="emby-checkbox" type="checkbox" id="UpperCaseTitle" />
-                        <span>Titel in Großbuchstaben</span>
+                        <span>Titel in Großbuchstaben (nur Querformat)</span>
                     </label>
                 </div>
 
@@ -48,6 +57,7 @@
             page.addEventListener('pageshow', function () {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (cfg) {
+                    page.querySelector('#Layout').value = cfg.Layout || 'Poster';
                     page.querySelector('#ExcludePatterns').value = cfg.ExcludePatterns || '';
                     page.querySelector('#FontPath').value = cfg.FontPath || '';
                     page.querySelector('#UpperCaseTitle').checked = cfg.UpperCaseTitle !== false;
@@ -59,6 +69,7 @@
                 e.preventDefault();
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (cfg) {
+                    cfg.Layout = page.querySelector('#Layout').value;
                     cfg.ExcludePatterns = page.querySelector('#ExcludePatterns').value;
                     cfg.FontPath = page.querySelector('#FontPath').value;
                     cfg.UpperCaseTitle = page.querySelector('#UpperCaseTitle').checked;

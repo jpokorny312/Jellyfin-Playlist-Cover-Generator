@@ -1,0 +1,52 @@
+name: Release
+
+# Push a tag like v0.2.0 to publish a plugin release.
+# Creates a GitHub release with the plugin ZIP and manifest.json; the manifest is the
+# Jellyfin plugin repository served at .../releases/latest/download/manifest.json.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Derive version from tag (v0.2.0 -> 0.2.0.0)
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          case "$TAG" in
+            *.*.*.*) VERSION="$TAG" ;;
+            *) VERSION="$TAG.0" ;;
+          esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./build.sh "$VERSION"
+
+      - name: Update manifest
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          curl -fsSL -o dist/previous.json "https://github.com/$REPO/releases/latest/download/manifest.json" || echo '[]' > dist/previous.json
+          python3 scripts/update_manifest.py dist/previous.json dist/manifest.json "$VERSION" \
+            "dist/playlist-covers_${VERSION}.zip" \
+            "https://github.com/$REPO/releases/download/$GITHUB_REF_NAME/playlist-covers_${VERSION}.zip" \
+            "Release $GITHUB_REF_NAME"
+          cat dist/manifest.json
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/playlist-covers_${VERSION}.zip" dist/manifest.json \
+            --title "Playlist Covers $GITHUB_REF_NAME" \
+            --notes "Plugin für Jellyfin 12.1. Installation: siehe README."
