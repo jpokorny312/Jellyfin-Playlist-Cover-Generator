@@ -1,55 +1,47 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using SkiaSharp;
 
 namespace Jellyfin.Plugin.PlaylistCovers;
 
-/// <summary>Portrait 1:2 layout: a fan of the real posters from the playlist, title and logos below.</summary>
+/// <summary>
+/// Portrait 2:3 layout: the playlist's real posters as a calm, receding stack,
+/// with the title set left-aligned underneath.
+/// </summary>
 public static partial class CoverRenderer
 {
     /// <summary>Poster layout width.</summary>
-    public const int PosterWidth = 1080;
+    public const int PosterWidth = 1200;
 
-    /// <summary>Poster layout height (1:2).</summary>
-    public const int PosterHeight = 2160;
+    /// <summary>Poster layout height (2:3).</summary>
+    public const int PosterHeight = 1800;
 
-    private const int PosterW = 660;
-    private const int PosterH = 990;
+    private const int TextMargin = 90;
+    private const float TextBottom = 1700f;
 
-    // Back-to-front (dx from centre, dy lift, scale, rotation in degrees) per number of posters.
-    // Outer posters sit higher so they peek out above the ones in front, like a hand of cards.
-    private static readonly (float Dx, float Dy, float Scale, float Rot)[][] FanSlots =
-    {
-        Array.Empty<(float, float, float, float)>(),
-        new[] { (0f, 0f, 1.0f, 0f) },
-        new[] { (-215f, 0f, 0.92f, -5f), (215f, 0f, 0.92f, 5f) },
-        new[] { (-330f, 0f, 0.82f, -9f), (330f, 0f, 0.82f, 9f), (0f, 0f, 1.0f, 0f) },
-        new[] { (-420f, -130f, 0.72f, -14f), (420f, -130f, 0.72f, 14f), (-205f, 0f, 0.9f, -5f), (205f, 0f, 0.9f, 5f) },
-        new[] { (-450f, -150f, 0.70f, -15f), (450f, -150f, 0.70f, 15f), (-300f, 0f, 0.84f, -8f), (300f, 0f, 0.84f, 8f), (0f, 0f, 1.0f, 0f) },
-    };
+    private static readonly float[] StackScale = { 1.00f, 0.94f, 0.88f, 0.82f };
+    private static readonly ConcurrentDictionary<string, SKTypeface?> EmbeddedFonts = new();
 
     /// <summary>Renders the portrait poster cover as JPEG.</summary>
     /// <param name="title">Playlist name.</param>
-    /// <param name="posters">Poster images of the titles (first five are used).</param>
-    /// <param name="backdrops">Optional backdrops for the blurred background; posters are used if empty.</param>
-    /// <param name="logos">Title logos.</param>
+    /// <param name="posters">Poster images of the titles (the first four are shown, the first one in front).</param>
     /// <param name="movies">Number of movies.</param>
     /// <param name="series">Number of series.</param>
-    /// <param name="fontPath">Optional font file.</param>
+    /// <param name="fontPath">Optional font file for the title.</param>
     /// <param name="upperCase">Render title in upper case.</param>
     /// <returns>JPEG bytes.</returns>
     public static byte[] RenderPosterJpeg(
         string title,
         IReadOnlyList<SKBitmap> posters,
-        IReadOnlyList<SKBitmap> backdrops,
-        IReadOnlyList<SKBitmap> logos,
         int movies,
         int series,
         string? fontPath = null,
-        bool upperCase = true)
+        bool upperCase = false)
     {
-        using var bitmap = RenderPoster(title, posters, backdrops, logos, movies, series, fontPath, upperCase);
+        using var bitmap = RenderPoster(title, posters, movies, series, fontPath, upperCase);
         using var image = SKImage.FromBitmap(bitmap);
         using var data = image.Encode(SKEncodedImageFormat.Jpeg, 92);
         return data.ToArray();
@@ -58,100 +50,125 @@ public static partial class CoverRenderer
     /// <summary>Renders the portrait poster cover as bitmap.</summary>
     /// <param name="title">Playlist name.</param>
     /// <param name="posters">Poster images of the titles.</param>
-    /// <param name="backdrops">Optional backdrops for the background.</param>
-    /// <param name="logos">Title logos.</param>
     /// <param name="movies">Number of movies.</param>
     /// <param name="series">Number of series.</param>
-    /// <param name="fontPath">Optional font file.</param>
+    /// <param name="fontPath">Optional font file for the title.</param>
     /// <param name="upperCase">Render title in upper case.</param>
     /// <returns>The rendered bitmap (caller disposes).</returns>
     public static SKBitmap RenderPoster(
         string title,
         IReadOnlyList<SKBitmap> posters,
-        IReadOnlyList<SKBitmap> backdrops,
-        IReadOnlyList<SKBitmap> logos,
         int movies,
         int series,
         string? fontPath = null,
-        bool upperCase = true)
+        bool upperCase = false)
     {
-        var fan = posters.Take(5).ToList();
-        var bgSources = (backdrops.Count > 0 ? backdrops : fan).Take(3).ToList();
-        var accent = DominantColor(bgSources.Count > 0 ? bgSources : fan);
+        var stack = posters.Take(4).ToList();
+        var accent = DominantColor(stack.Take(3).ToList());
 
-        using var background = Background(bgSources, PosterWidth, PosterHeight);
-        var result = Grade(background, accent, PosterWidth, PosterHeight, 40f);
+        using var hero = stack.Count > 0
+            ? CoverFit(stack[0], PosterWidth, PosterHeight, 0.5f)
+            : SolidBitmap(new SKColor(30, 30, 36));
+        var result = GradePoster(hero, accent);
         using var canvas = new SKCanvas(result);
 
-        DrawFan(canvas, fan);
-
-        using var typeface = LoadTypeface(fontPath);
-        var text = upperCase ? title.ToUpperInvariant() : title;
-        var (font, lines) = FitTitle(text, typeface, PosterWidth - 140, 112);
-        using (font)
-        {
-            var hasLogos = logos.Count > 0;
-            var lineHeight = font.Size * 1.12f;
-            var y = hasLogos ? 1390f : 1440f;
-
-            using var titlePaint = new SKPaint
-            {
-                IsAntialias = true,
-                Color = SKColors.White,
-                ImageFilter = SKImageFilter.CreateDropShadow(0, 5, 10, 10, new SKColor(0, 0, 0, 170))
-            };
-            foreach (var line in lines)
-            {
-                var w = font.MeasureText(line);
-                canvas.DrawText(line, (PosterWidth - w) / 2f, y - font.Metrics.Ascent, SKTextAlign.Left, font, titlePaint);
-                y += lineHeight;
-            }
-
-            var barY = y + 18;
-            using var barPaint = new SKPaint { IsAntialias = true, Color = accent };
-            canvas.DrawRoundRect(new SKRect((PosterWidth / 2f) - 70, barY, (PosterWidth / 2f) + 70, barY + 7), 4, 4, barPaint);
-
-            var sub = Subline(movies, series);
-            var subBottom = barY + 7;
-            if (sub.Length > 0)
-            {
-                using var subFont = new SKFont(typeface, 38) { Edging = SKFontEdging.SubpixelAntialias };
-                using var subPaint = new SKPaint { IsAntialias = true, Color = new SKColor(235, 235, 240, 235) };
-                var sw = subFont.MeasureText(sub);
-                canvas.DrawText(sub, (PosterWidth - sw) / 2f, barY + 34 - subFont.Metrics.Ascent, SKTextAlign.Left, subFont, subPaint);
-                subBottom = barY + 34 + 38;
-            }
-
-            if (hasLogos)
-            {
-                DrawLogoRow(canvas, logos.Take(3).ToList(), Math.Min(2000f, subBottom + 80f), PosterWidth, PosterWidth - 140f, 280, 110);
-            }
-        }
-
+        // The title block is anchored to the bottom; the stack is centred in the space above it.
+        var textTop = DrawTitleBlock(canvas, upperCase ? title.ToUpperInvariant() : title, Subline(movies, series), accent, fontPath);
+        DrawStack(canvas, stack, textTop);
         return result;
     }
 
-    private static void DrawFan(SKCanvas canvas, List<SKBitmap> fan)
+    private static SKBitmap SolidBitmap(SKColor color)
     {
-        var slots = FanSlots[Math.Min(fan.Count, 5)];
-        for (var i = 0; i < slots.Length; i++)
+        var bmp = new SKBitmap(new SKImageInfo(PosterWidth, PosterHeight, SKColorType.Bgra8888, SKAlphaType.Premul));
+        bmp.Erase(color);
+        return bmp;
+    }
+
+    /// <summary>Blurred, darkened hero with a hint of the accent colour, a dark floor and a touch of film grain.</summary>
+    private static SKBitmap GradePoster(SKBitmap hero, SKColor accent)
+    {
+        var bmp = new SKBitmap(new SKImageInfo(PosterWidth, PosterHeight, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var canvas = new SKCanvas(bmp))
+        using (var paint = new SKPaint { ImageFilter = SKImageFilter.CreateBlur(48, 48, SKShaderTileMode.Clamp) })
+        using (var image = SKImage.FromBitmap(hero))
         {
-            var (dx, dy, scale, rot) = slots[i];
-            var w = PosterW * scale;
-            var h = PosterH * scale;
-            var cx = (PosterWidth / 2f) + (dx * 1.1f);
-            var cy = 850f + ((1f - scale) * 80f) + dy;
+            canvas.DrawImage(image, 0, 0, new SKSamplingOptions(), paint);
+        }
 
-            using var poster = CoverFit(fan[slots.Length - 1 - i], (int)w, (int)h, 0.5f);
-            using var image = SKImage.FromBitmap(poster);
-            var rect = new SKRect(-w / 2, -h / 2, w / 2, h / 2);
-            using var rrect = new SKRoundRect(rect, 20);
+        var px = bmp.Bytes;
+        float tr = accent.Red / 255f, tg = accent.Green / 255f, tb = accent.Blue / 255f;
+        var rnd = new Random(7);
 
-            canvas.Save();
-            canvas.Translate(cx, cy);
-            canvas.RotateDegrees(rot);
+        for (var y = 0; y < PosterHeight; y++)
+        {
+            var ny = y / (float)PosterHeight;
+            var floor = MathF.Pow(Math.Clamp((ny - 0.5f) / 0.5f, 0f, 1f), 1.5f) * 0.85f;
+            var dim = 0.46f - (0.10f * ny);
+            for (var x = 0; x < PosterWidth; x++)
+            {
+                var nx = (x - (PosterWidth / 2f)) / (PosterWidth / 2f);
+                var vig = 1f - (0.30f * Math.Clamp((nx * nx * 0.8f) + ((ny - 0.45f) * (ny - 0.45f) * 1.2f), 0f, 1f));
+                var grain = ((float)rnd.NextDouble() - 0.5f) * 0.04f;
 
-            using (var shadow = new SKPaint { IsAntialias = true, ImageFilter = SKImageFilter.CreateDropShadowOnly(0, 22, 26, 26, new SKColor(0, 0, 0, 200)) })
+                var o = ((y * PosterWidth) + x) * 4;
+                var b = px[o] / 255f * dim;
+                var g = px[o + 1] / 255f * dim;
+                var r = px[o + 2] / 255f * dim;
+
+                // a whisper of the accent colour, then fade into a near-black floor
+                r = (r * 0.86f) + (tr * 0.05f);
+                g = (g * 0.86f) + (tg * 0.05f);
+                b = (b * 0.86f) + (tb * 0.05f);
+                r = (r * (1 - floor)) + (0.035f * floor);
+                g = (g * (1 - floor)) + (0.035f * floor);
+                b = (b * (1 - floor)) + (0.045f * floor);
+
+                px[o] = ToByte((b * vig) + grain);
+                px[o + 1] = ToByte((g * vig) + grain);
+                px[o + 2] = ToByte((r * vig) + grain);
+                px[o + 3] = 255;
+            }
+        }
+
+        System.Runtime.InteropServices.Marshal.Copy(px, 0, bmp.GetPixels(), px.Length);
+        return bmp;
+    }
+
+    private static byte ToByte(float v) => (byte)(Math.Clamp(v, 0f, 1f) * 255f);
+
+    /// <summary>Posters overlap left to right, each one a little smaller; the first title sits in front.</summary>
+    private static void DrawStack(SKCanvas canvas, List<SKBitmap> stack, float textTop)
+    {
+        var n = stack.Count;
+        if (n == 0)
+        {
+            return;
+        }
+
+        var w0 = n switch { 1 => 680f, 2 => 560f, 3 => 520f, _ => 470f };
+
+        // free zone above the text; shrink the stack if a long title leaves too little room
+        var zoneTop = 90f;
+        var zoneBottom = textTop - 90f;
+        w0 = Math.Min(w0, (zoneBottom - zoneTop) / 1.5f);
+        var stackBottom = ((zoneTop + zoneBottom) / 2f) + (w0 * 1.5f / 2f);
+        var step = n == 1 ? 0f : w0 * 0.5f;
+        var total = (step * (n - 1)) + (w0 * StackScale[n - 1]);
+        var x0 = (PosterWidth - total) / 2f;
+
+        for (var i = n - 1; i >= 0; i--)
+        {
+            var w = w0 * StackScale[i];
+            var h = w * 1.5f;
+            var x = x0 + (step * i);
+            var rect = new SKRect(x, stackBottom - h, x + w, stackBottom);
+
+            using var fitted = CoverFit(stack[i], (int)w, (int)h, 0.5f);
+            using var image = SKImage.FromBitmap(fitted);
+            using var rrect = new SKRoundRect(rect, 12);
+
+            using (var shadow = new SKPaint { IsAntialias = true, ImageFilter = SKImageFilter.CreateDropShadowOnly(0, 20, 26, 26, new SKColor(0, 0, 0, 150)) })
             {
                 canvas.DrawRoundRect(rrect, shadow);
             }
@@ -161,12 +178,103 @@ public static partial class CoverRenderer
             canvas.DrawImage(image, rect, new SKSamplingOptions(SKCubicResampler.Mitchell));
             canvas.Restore();
 
-            using (var edge = new SKPaint { IsAntialias = true, IsStroke = true, StrokeWidth = 2, Color = new SKColor(255, 255, 255, 40) })
-            {
-                canvas.DrawRoundRect(rrect, edge);
-            }
-
-            canvas.Restore();
+            using var edge = new SKPaint { IsAntialias = true, IsStroke = true, StrokeWidth = 1.5f, Color = new SKColor(255, 255, 255, 28) };
+            canvas.DrawRoundRect(rrect, edge);
         }
     }
+
+    /// <summary>Accent hairline, title and a small tracked line – left-aligned, anchored to the bottom.</summary>
+    private static float DrawTitleBlock(SKCanvas canvas, string title, string sub, SKColor accent, string? fontPath)
+    {
+        var ownsTitleFace = false;
+        SKTypeface? titleFace = null;
+        if (string.IsNullOrWhiteSpace(fontPath) || !File.Exists(fontPath))
+        {
+            titleFace = Embedded("Inter-SemiBold.ttf");
+        }
+
+        if (titleFace == null)
+        {
+            titleFace = LoadTypeface(fontPath);
+            ownsTitleFace = true;
+        }
+
+        var subFace = Embedded("Inter-Medium.ttf") ?? titleFace;
+
+        try
+        {
+            var (font, lines) = FitTitle(title, titleFace, PosterWidth - (2 * TextMargin), 96);
+            using (font)
+            using (var subFont = new SKFont(subFace, 27) { Edging = SKFontEdging.SubpixelAntialias })
+            {
+                const float spacing = 4f;
+                var lineHeight = font.Size * 1.12f;
+                var hasSub = sub.Length > 0;
+
+                var subTop = TextBottom - 27f;
+                var titleBottom = hasSub ? subTop - 30f : TextBottom;
+                var titleTop = titleBottom - (lineHeight * lines.Count);
+                var hairlineY = titleTop - 38f;
+
+                using (var bar = new SKPaint { IsAntialias = true, Color = accent })
+                {
+                    canvas.DrawRoundRect(new SKRect(TextMargin, hairlineY, TextMargin + 64, hairlineY + 4), 2, 2, bar);
+                }
+
+                using var titlePaint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Color = SKColors.White,
+                    ImageFilter = SKImageFilter.CreateDropShadow(0, 3, 8, 8, new SKColor(0, 0, 0, 120))
+                };
+                var y = titleTop;
+                foreach (var line in lines)
+                {
+                    canvas.DrawText(line, TextMargin, y - font.Metrics.Ascent, SKTextAlign.Left, font, titlePaint);
+                    y += lineHeight;
+                }
+
+                if (hasSub)
+                {
+                    using var subPaint = new SKPaint { IsAntialias = true, Color = new SKColor(255, 255, 255, 150) };
+                    DrawTracked(canvas, sub.ToUpperInvariant(), TextMargin, subTop - subFont.Metrics.Ascent, subFont, subPaint, spacing);
+                }
+
+                return hairlineY;
+            }
+        }
+        finally
+        {
+            if (ownsTitleFace)
+            {
+                titleFace.Dispose();
+            }
+        }
+    }
+
+    private static void DrawTracked(SKCanvas canvas, string text, float x, float baseline, SKFont font, SKPaint paint, float spacing)
+    {
+        foreach (var ch in text)
+        {
+            var s = ch.ToString();
+            canvas.DrawText(s, x, baseline, SKTextAlign.Left, font, paint);
+            x += font.MeasureText(s) + spacing;
+        }
+    }
+
+    /// <summary>Loads a font bundled in the plugin assembly (cached for the process lifetime).</summary>
+    private static SKTypeface? Embedded(string fileName) =>
+        EmbeddedFonts.GetOrAdd(fileName, name =>
+        {
+            using var stream = typeof(CoverRenderer).Assembly.GetManifestResourceStream($"Jellyfin.Plugin.PlaylistCovers.Fonts.{name}");
+            if (stream == null)
+            {
+                return null;
+            }
+
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            using var data = SKData.CreateCopy(ms.ToArray());
+            return SKTypeface.FromData(data);
+        });
 }

@@ -102,7 +102,7 @@ var posterSets = new (string Name, string File, SKBitmap[] Posters, SKBitmap[] B
 foreach (var s in posterSets)
 {
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    var jpeg = CoverRenderer.RenderPosterJpeg(s.Name, s.Posters, s.Bd, s.Logos.Select(Logo).ToList(), s.Movies, s.Series, font);
+    var jpeg = CoverRenderer.RenderPosterJpeg(s.Name, s.Posters, s.Movies, s.Series, font);
     var file = Path.Combine(outDir, s.File + ".jpg");
     File.WriteAllBytes(file, jpeg);
     Console.WriteLine($"{file}  {sw.ElapsedMilliseconds} ms");
