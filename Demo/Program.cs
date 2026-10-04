@@ -107,3 +107,89 @@ foreach (var s in posterSets)
     File.WriteAllBytes(file, jpeg);
     Console.WriteLine($"{file}  {sw.ElapsedMilliseconds} ms");
 }
+
+// ---- text-free styles: wall / mosaic / hero ----
+// Procedural stand-ins for real posters: sky gradient, sun/moon, mountains, a figure, title lettering.
+SKBitmap FancyPoster(int i)
+{
+    string[] names = { "NACHTZUG", "SILBERFLUSS", "DER LETZTE SOMMER", "KOMET", "EISENHERZ", "STADT AUS GLAS", "WÜSTENFUCHS", "ROTE LATERNE", "TIEFSEE", "DAS ECHO", "FRÜHLINGSSTURM", "MONDSCHEIN" };
+    SKColor[][] palettes =
+    {
+        new SKColor[] { new(18, 30, 70), new(230, 120, 60) }, new SKColor[] { new(10, 60, 80), new(200, 230, 220) },
+        new SKColor[] { new(240, 170, 60), new(160, 50, 40) }, new SKColor[] { new(20, 10, 50), new(120, 70, 200) },
+        new SKColor[] { new(120, 20, 25), new(30, 10, 15) }, new SKColor[] { new(40, 90, 120), new(190, 220, 235) },
+        new SKColor[] { new(210, 140, 70), new(110, 50, 30) }, new SKColor[] { new(150, 20, 40), new(250, 150, 70) },
+        new SKColor[] { new(5, 30, 60), new(20, 130, 150) }, new SKColor[] { new(60, 60, 70), new(190, 190, 200) },
+        new SKColor[] { new(70, 130, 70), new(230, 220, 140) }, new SKColor[] { new(15, 20, 50), new(210, 210, 235) },
+    };
+    var rnd = new Random(100 + i);
+    var pal = palettes[i % palettes.Length];
+    var bmp = new SKBitmap(600, 900);
+    using var c = new SKCanvas(bmp);
+    using (var sky = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(0, 900), new[] { pal[0], pal[1] }, SKShaderTileMode.Clamp))
+    using (var p = new SKPaint { Shader = sky }) { c.DrawRect(0, 0, 600, 900, p); }
+    using (var sun = new SKPaint { Color = new SKColor(255, 245, 220, 200), IsAntialias = true, ImageFilter = SKImageFilter.CreateBlur(3, 3) })
+    { c.DrawCircle(rnd.Next(150, 450), rnd.Next(220, 420), rnd.Next(55, 100), sun); }
+    for (var layer = 0; layer < 3; layer++)
+    {
+        using var path = new SKPath();
+        var baseY = 520 + (layer * 90);
+        path.MoveTo(0, 900); path.LineTo(0, baseY);
+        for (var x = 0; x <= 600; x += 60) { path.LineTo(x, baseY - rnd.Next(20, 120)); }
+        path.LineTo(600, 900); path.Close();
+        var shade = (byte)(60 - (layer * 20));
+        using var m = new SKPaint { Color = new SKColor(shade, shade, (byte)(shade + 10), 230), IsAntialias = true };
+        c.DrawPath(path, m);
+    }
+    using (var fig = new SKPaint { Color = new SKColor(8, 8, 12), IsAntialias = true })
+    {
+        var fx = rnd.Next(180, 420);
+        c.DrawOval(fx, 600, 14, 14, fig);
+        c.DrawRoundRect(new SKRect(fx - 16, 614, fx + 16, 690), 8, 8, fig);
+    }
+    using var face = SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold);
+    using var f = new SKFont(face, names[i % names.Length].Length > 11 ? 40 : 54);
+    using var t = new SKPaint { Color = new SKColor(255, 255, 255, 235), IsAntialias = true };
+    var title = names[i % names.Length];
+    c.DrawText(title, 300 - (f.MeasureText(title) / 2), 800, SKTextAlign.Left, f, t);
+    using var bill = new SKPaint { Color = new SKColor(255, 255, 255, 90) };
+    c.DrawRect(120, 835, 360, 5, bill);
+    return bmp;
+}
+
+var counts = new[] { ("viele Titel (12)", 12), ("mittel (5)", 5), ("wenige (2)", 2) };
+var styles = new[] { "wall", "mosaic", "hero" };
+const int cellW = 400, cellH = 600, pad = 24, labelH = 44;
+using var sheet = new SKBitmap(pad + (styles.Length * (cellW + pad)), labelH + pad + (counts.Length * (cellH + pad)) + pad);
+using (var sc = new SKCanvas(sheet))
+{
+    sc.Clear(new SKColor(24, 24, 28));
+    using var lf = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold), 22);
+    using var lp = new SKPaint { Color = new SKColor(230, 230, 235), IsAntialias = true };
+    for (var si = 0; si < styles.Length; si++)
+    {
+        sc.DrawText(new[] { "A · Poster-Wand", "B · Mosaik", "C · Held + Stapel" }[si], pad + (si * (cellW + pad)), 36, SKTextAlign.Left, lf, lp);
+    }
+
+    for (var ri = 0; ri < counts.Length; ri++)
+    {
+        var posters = Enumerable.Range(0, counts[ri].Item2).Select(FancyPoster).ToList();
+        for (var si = 0; si < styles.Length; si++)
+        {
+            var jpeg = CoverRenderer.RenderStyledJpeg(posters, styles[si]);
+            File.WriteAllBytes(Path.Combine(outDir, $"style_{styles[si]}_{counts[ri].Item2}.jpg"), jpeg);
+            using var cover = SKBitmap.Decode(jpeg);
+            using var img = SKImage.FromBitmap(cover);
+            sc.DrawImage(img, new SKRect(pad + (si * (cellW + pad)), labelH + pad + (ri * (cellH + pad)), pad + (si * (cellW + pad)) + cellW, labelH + pad + (ri * (cellH + pad)) + cellH), new SKSamplingOptions(SKCubicResampler.Mitchell));
+        }
+
+        sc.DrawText(counts[ri].Item1, pad, labelH + pad + (ri * (cellH + pad)) + cellH + 18, SKTextAlign.Left, lf, lp);
+    }
+}
+
+using (var si = SKImage.FromBitmap(sheet))
+{
+    File.WriteAllBytes(Path.Combine(outDir, "styles_overview.jpg"), si.Encode(SKEncodedImageFormat.Jpeg, 90).ToArray());
+}
+
+Console.WriteLine("styles_overview.jpg written");
