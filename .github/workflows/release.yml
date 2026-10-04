@@ -35,8 +35,19 @@ jobs:
       - name: Update manifest
         env:
           REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL -o dist/previous.json "https://github.com/$REPO/releases/latest/download/manifest.json" || echo '[]' > dist/previous.json
+          # Take the manifest of the newest *other* release that has one. ("releases/latest" is not
+          # reliable here: a release created in the GitHub UI is already "latest" before it has a manifest.)
+          rm -f dist/previous.json
+          for tag in $(gh release list --repo "$REPO" --limit 30 --json tagName --jq '.[].tagName'); do
+            [ "$tag" = "$GITHUB_REF_NAME" ] && continue
+            if gh release download "$tag" --repo "$REPO" --pattern manifest.json --output dist/previous.json 2>/dev/null; then
+              echo "previous manifest from $tag"
+              break
+            fi
+          done
+          [ -f dist/previous.json ] || echo '[]' > dist/previous.json
           python3 scripts/update_manifest.py dist/previous.json dist/manifest.json "$VERSION" \
             "dist/playlist-covers_${VERSION}.zip" \
             "https://github.com/$REPO/releases/download/$GITHUB_REF_NAME/playlist-covers_${VERSION}.zip" \
