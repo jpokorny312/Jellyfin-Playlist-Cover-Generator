@@ -15,7 +15,7 @@ TARGET_ABI = "12.1.0.0"
 PLUGIN = {
     "guid": "6f1c3a52-8d3e-4b7a-9a41-2c5e7d90b1f4",
     "name": "Playlist Covers",
-    "description": "Erzeugt hochwertige Cover für Film- und Serien-Playlists.",
+    "description": "Erzeugt Poster-Cover im Streaming-Look für Film- und Serien-Playlists.",
     "overview": "Poster-Cover im Streaming-Look für Playlists",
     "owner": "jpokorny312",
     "category": "General",

@@ -30,7 +30,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override Guid Id => Guid.Parse("6f1c3a52-8d3e-4b7a-9a41-2c5e7d90b1f4");
 
     /// <inheritdoc />
-    public override string Description => "Erzeugt hochwertige Cover für Film- und Serien-Playlists.";
+    public override string Description => "Erzeugt Poster-Cover im Streaming-Look für Film- und Serien-Playlists.";
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()

@@ -5,35 +5,54 @@ using SkiaSharp;
 
 namespace Jellyfin.Plugin.PlaylistCovers;
 
-/// <summary>Text-free 2:3 cover styles built only from the playlist's posters.</summary>
+/// <summary>The cover styles. Clients overlay a count badge (top right) and a progress bar (bottom), so keep those corners calm.</summary>
 public static partial class CoverRenderer
 {
-    /// <summary>Renders a text-free cover in the given style ("wall", "mosaic" or "hero").</summary>
-    /// <param name="posters">Poster images (first one is the most important).</param>
-    /// <param name="style">Style name; styles that need more posters than available fall back to "hero".</param>
+    /// <summary>Names accepted by <see cref="Render"/>.</summary>
+    public static readonly string[] Styles = { "Auto", "Wall", "Mosaic", "Hero" };
+
+    /// <summary>Renders a cover and returns it as JPEG.</summary>
+    /// <param name="posters">Poster images, in playlist order (the first one is the most important).</param>
+    /// <param name="style">"Auto", "Wall", "Mosaic" or "Hero". Styles that need more posters than available fall back to "Hero".</param>
+    /// <returns>JPEG bytes.</returns>
+    public static byte[] RenderJpeg(IReadOnlyList<SKBitmap> posters, string style)
+    {
+        using var bitmap = Render(posters, style);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 92);
+        return data.ToArray();
+    }
+
+    /// <summary>Renders a cover.</summary>
+    /// <param name="posters">Poster images, in playlist order.</param>
+    /// <param name="style">Style name, see <see cref="Styles"/>.</param>
     /// <returns>The rendered bitmap (caller disposes).</returns>
-    public static SKBitmap RenderStyled(IReadOnlyList<SKBitmap> posters, string style)
+    public static SKBitmap Render(IReadOnlyList<SKBitmap> posters, string style)
     {
         var n = posters.Count;
         var accent = DominantColor(posters.Take(4).ToList());
-        return style.ToLowerInvariant() switch
+        var chosen = ResolveStyle(n, style);
+        return chosen switch
         {
-            "wall" when n >= 4 => RenderWall(posters, accent),
-            "mosaic" when n >= 4 => RenderMosaic(posters, accent),
+            "Wall" => RenderWall(posters, accent),
+            "Mosaic" => RenderMosaic(posters, accent),
             _ => RenderHero(posters, accent),
         };
     }
 
-    /// <summary>Renders a text-free cover and returns it as JPEG.</summary>
-    /// <param name="posters">Poster images.</param>
-    /// <param name="style">Style name.</param>
-    /// <returns>JPEG bytes.</returns>
-    public static byte[] RenderStyledJpeg(IReadOnlyList<SKBitmap> posters, string style)
+    /// <summary>Picks the style that actually gets rendered for <paramref name="count"/> posters.</summary>
+    /// <param name="count">Number of posters available.</param>
+    /// <param name="style">Requested style.</param>
+    /// <returns>"Wall", "Mosaic" or "Hero".</returns>
+    public static string ResolveStyle(int count, string? style)
     {
-        using var bitmap = RenderStyled(posters, style);
-        using var image = SKImage.FromBitmap(bitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 92);
-        return data.ToArray();
+        var s = Styles.FirstOrDefault(x => string.Equals(x, style, StringComparison.OrdinalIgnoreCase)) ?? "Auto";
+        if (s == "Auto")
+        {
+            s = count >= 6 ? "Wall" : count >= 4 ? "Mosaic" : "Hero";
+        }
+
+        return (s == "Wall" || s == "Mosaic") && count < 4 ? "Hero" : s;
     }
 
     private static SKBitmap NewCanvas(SKColor fill)
@@ -48,7 +67,6 @@ public static partial class CoverRenderer
     {
         const float lr = 0.2126f, lg = 0.7152f, lb = 0.0722f;
         var s = saturation;
-        var k = brightness;
         float[] m =
         {
             (lr * (1 - s)) + s, lg * (1 - s), lb * (1 - s), 0, 0,
@@ -60,14 +78,14 @@ public static partial class CoverRenderer
         {
             for (var col = 0; col < 3; col++)
             {
-                m[(row * 5) + col] *= k;
+                m[(row * 5) + col] *= brightness;
             }
         }
 
         return SKColorFilter.CreateColorMatrix(m);
     }
 
-    /// <summary>Draws one poster scaled to fill <paramref name="rect"/> with optional rounded corners.</summary>
+    /// <summary>Draws one image scaled to fill <paramref name="rect"/> with optional rounded corners.</summary>
     private static void DrawTile(SKCanvas canvas, SKImage image, SKRect rect, float radius, SKColorFilter? filter)
     {
         using var paint = new SKPaint { IsAntialias = true, ColorFilter = filter };
@@ -85,7 +103,7 @@ public static partial class CoverRenderer
         canvas.Restore();
     }
 
-    /// <summary>Vignette, a touch of the accent colour and film grain, applied in place.</summary>
+    /// <summary>Vignette, a touch of the accent colour, a darker floor and film grain, applied in place.</summary>
     private static void Finish(SKBitmap bmp, SKColor accent, float vignette, float tint, float grainAmount, float floorDark)
     {
         var px = bmp.Bytes;
@@ -117,7 +135,7 @@ public static partial class CoverRenderer
 
     /// <summary>
     /// "Wall": a slightly tilted, staggered wall of posters that bleeds off every edge
-    /// (the look of streaming sign-up screens). Works best with 6+ titles.
+    /// (the look of streaming sign-up screens). Best with 6+ titles.
     /// </summary>
     private static SKBitmap RenderWall(IReadOnlyList<SKBitmap> posters, SKColor accent)
     {
@@ -143,7 +161,7 @@ public static partial class CoverRenderer
                 var stagger = (((c % 3) + 3) % 3) * ((ph + gap) / 3f);
                 for (var r = -rows; r <= rows; r++)
                 {
-                    var idx = (((c * 3) + (r * 5)) % n + n) % n;
+                    var idx = ((((c * 3) + (r * 5)) % n) + n) % n;
                     var x = (c * (pw + gap)) - (pw / 2f);
                     var y = (r * (ph + gap)) - (ph / 2f) + stagger;
                     DrawTile(canvas, tiles[idx], new SKRect(x, y, x + pw, y + ph), 10, filter);
@@ -160,12 +178,13 @@ public static partial class CoverRenderer
     }
 
     /// <summary>
-    /// "Mosaic": the familiar 2×2 / 3×3 grid of Spotify and Apple Music, but with hairline gutters
-    /// and one shared colour grade so the posters read as a single image.
+    /// "Mosaic": the familiar 2×2 / 3×3 grid of Spotify and Apple Music, with hairline gutters,
+    /// one shared colour grade and posters ordered by colour so the grid reads as a gradient.
     /// </summary>
     private static SKBitmap RenderMosaic(IReadOnlyList<SKBitmap> posters, SKColor accent)
     {
         var grid = posters.Count >= 9 ? 3 : 2;
+        var chosen = SortByColor(posters.Take(grid * grid).ToList());
         const int gutter = 6;
         var tw = (PosterWidth - (gutter * (grid - 1))) / (float)grid;
         var th = (PosterHeight - (gutter * (grid - 1))) / (float)grid;
@@ -174,12 +193,12 @@ public static partial class CoverRenderer
         using (var canvas = new SKCanvas(result))
         using (var filter = Harmonise(0.86f, 0.92f))
         {
-            for (var i = 0; i < grid * grid; i++)
+            for (var i = 0; i < chosen.Count; i++)
             {
                 var col = i % grid;
                 var row = i / grid;
                 var rect = new SKRect(col * (tw + gutter), row * (th + gutter), (col * (tw + gutter)) + tw, (row * (th + gutter)) + th);
-                using var fitted = CoverFit(posters[i], (int)Math.Ceiling(tw), (int)Math.Ceiling(th), 0.5f);
+                using var fitted = CoverFit(chosen[i], (int)Math.Ceiling(tw), (int)Math.Ceiling(th), 0.5f);
                 using var image = SKImage.FromBitmap(fitted);
                 DrawTile(canvas, image, rect, 0, filter);
             }
@@ -191,28 +210,37 @@ public static partial class CoverRenderer
 
     /// <summary>
     /// "Hero": the first title large and complete, with up to two more posters peeking out above it
-    /// like a stack of cards; background is the blurred hero poster. Works for any number of titles.
+    /// like a stack of cards, on a blurred, colour-boosted copy of the hero poster. Works for any number of titles.
     /// </summary>
     private static SKBitmap RenderHero(IReadOnlyList<SKBitmap> posters, SKColor accent)
     {
         var stack = posters.Take(3).ToList();
+        var result = NewCanvas(new SKColor(24, 24, 28));
         if (stack.Count == 0)
         {
-            var empty = NewCanvas(new SKColor(24, 24, 28));
-            Finish(empty, accent, 0.4f, 0f, 0.03f, 0f);
-            return empty;
+            Finish(result, accent, 0.4f, 0f, 0.03f, 0f);
+            return result;
         }
 
-        using var hero = CoverFit(stack[0], PosterWidth, PosterHeight, 0.5f);
-        var result = GradePoster(hero, accent);
+        // background: the hero poster, blurred, more saturated and darkened
+        using (var bgCanvas = new SKCanvas(result))
+        using (var fitted = CoverFit(stack[0], PosterWidth, PosterHeight, 0.5f))
+        using (var image = SKImage.FromBitmap(fitted))
+        using (var bg = new SKPaint { ColorFilter = Harmonise(1.5f, 0.68f), ImageFilter = SKImageFilter.CreateBlur(50, 50, SKShaderTileMode.Clamp) })
+        {
+            bgCanvas.DrawImage(image, 0, 0, new SKSamplingOptions(), bg);
+        }
+
+        // vignette, darker floor and grain only on the background, never on the posters
+        Finish(result, accent, vignette: 0.30f, tint: 0f, grainAmount: 0.03f, floorDark: 0.30f);
         using var canvas = new SKCanvas(result);
 
-        // (width, top) per card, back to front; the front card is last.
+        // (width, top) per card, back to front; the front card is last. Keeps ~60px clear at the bottom (progress bar).
         var cards = stack.Count switch
         {
             1 => new[] { (960f, 180f) },
-            2 => new[] { (780f, 150f), (940f, 330f) },
-            _ => new[] { (640f, 110f), (790f, 235f), (940f, 365f) },
+            2 => new[] { (780f, 150f), (940f, 310f) },
+            _ => new[] { (640f, 100f), (790f, 215f), (940f, 330f) },
         };
 
         for (var i = 0; i < cards.Length; i++)
@@ -226,13 +254,13 @@ public static partial class CoverRenderer
             using var rrect = new SKRoundRect(rect, 18);
             var isFront = i == cards.Length - 1;
 
-            using (var shadow = new SKPaint { IsAntialias = true, ImageFilter = SKImageFilter.CreateDropShadowOnly(0, isFront ? 26 : 14, isFront ? 34 : 20, isFront ? 34 : 20, new SKColor(0, 0, 0, (byte)(isFront ? 180 : 140))) })
+            using (var shadow = new SKPaint { IsAntialias = true, ImageFilter = SKImageFilter.CreateDropShadowOnly(0, isFront ? 26 : 14, isFront ? 34 : 20, isFront ? 34 : 20, new SKColor(0, 0, 0, (byte)(isFront ? 190 : 150))) })
             {
                 canvas.DrawRoundRect(rrect, shadow);
             }
 
             // cards further back are dimmed so the front one leads
-            using var dim = isFront ? null : Harmonise(0.9f, 0.62f);
+            using var dim = isFront ? null : Harmonise(0.95f, 0.70f);
             DrawTile(canvas, image, rect, 18, dim);
 
             using var edge = new SKPaint { IsAntialias = true, IsStroke = true, StrokeWidth = 1.5f, Color = new SKColor(255, 255, 255, 30) };

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Builds dist/playlist-covers_<version>.zip (plugin DLL + meta.json) for Jellyfin.
-# Usage: ./build.sh [version]   (4-part, default 0.2.0.0)
+# Usage: ./build.sh [version]   (4-part, default 0.3.0.0)
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="${1:-0.2.0.0}"
+VERSION="${1:-0.3.0.0}"
 TARGET_ABI="12.1.0.0"
 PROJECT=Jellyfin.Plugin.PlaylistCovers
 OUT=dist/stage
@@ -20,7 +20,7 @@ cat > "$OUT/meta.json" <<JSON
 {
   "guid": "6f1c3a52-8d3e-4b7a-9a41-2c5e7d90b1f4",
   "name": "Playlist Covers",
-  "description": "Erzeugt hochwertige Cover für Film- und Serien-Playlists.",
+  "description": "Erzeugt Poster-Cover im Streaming-Look für Film- und Serien-Playlists.",
   "overview": "Poster-Cover im Streaming-Look für Playlists",
   "owner": "jpokorny312",
   "category": "General",

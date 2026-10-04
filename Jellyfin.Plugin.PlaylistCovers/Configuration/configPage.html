@@ -5,7 +5,7 @@
     <title>Playlist Covers</title>
 </head>
 <body>
-<div id="PlaylistCoversConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select,emby-textarea">
+<div id="PlaylistCoversConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-button,emby-select,emby-textarea">
     <div data-role="content">
         <div class="content-primary">
             <form id="PlaylistCoversForm">
@@ -13,31 +13,20 @@
                 <p>Die Cover werden über Dashboard &rarr; Geplante Aufgaben &rarr; „Playlist-Cover erzeugen“ erstellt (täglich und beim Serverstart; dort auch manuell startbar).</p>
 
                 <div class="selectContainer">
-                    <label class="selectLabel" for="Layout">Format</label>
-                    <select is="emby-select" id="Layout" class="emby-select-withcolor emby-select">
-                        <option value="Poster">Poster (2:3) – die Poster der Titel als Stapel</option>
-                        <option value="Landscape">Querformat (16:9) – Backdrops und Logos</option>
+                    <label class="selectLabel" for="Style">Stil</label>
+                    <select is="emby-select" id="Style" class="emby-select-withcolor emby-select">
+                        <option value="Auto">Automatisch (empfohlen)</option>
+                        <option value="Wall">Poster-Wand</option>
+                        <option value="Mosaic">Mosaik</option>
+                        <option value="Hero">Held + Stapel</option>
                     </select>
-                    <div class="fieldDescription">Nach einem Wechsel werden alle Cover beim nächsten Lauf der Aufgabe neu erzeugt.</div>
+                    <div class="fieldDescription">Automatisch: ab 6 Titeln Poster-Wand, bei 4–5 Mosaik, darunter Held + Stapel. Nach einem Wechsel werden alle Cover beim nächsten Lauf neu erzeugt.</div>
                 </div>
 
                 <div class="inputContainer">
                     <label class="inputLabel inputLabelUnfocused" for="ExcludePatterns">Playlists ausschließen (eine pro Zeile, * und ? erlaubt)</label>
                     <textarea is="emby-textarea" id="ExcludePatterns" rows="5" style="width:100%"></textarea>
                     <div class="fieldDescription">Hier eingetragene Playlists behalten ihr eigenes Cover.</div>
-                </div>
-
-                <div class="inputContainer">
-                    <label class="inputLabel inputLabelUnfocused" for="FontPath">Schriftart (Pfad zu .ttf/.otf, optional)</label>
-                    <input is="emby-input" type="text" id="FontPath" />
-                    <div class="fieldDescription">Pfad auf dem Server, z. B. /config/fonts/Montserrat-Bold.ttf. Leer = Systemschrift.</div>
-                </div>
-
-                <div class="checkboxContainer checkboxContainer-withDescription">
-                    <label class="emby-checkbox-label">
-                        <input is="emby-checkbox" type="checkbox" id="UpperCaseTitle" />
-                        <span>Titel in Großbuchstaben (nur Querformat)</span>
-                    </label>
                 </div>
 
                 <div>
@@ -57,10 +46,8 @@
             page.addEventListener('pageshow', function () {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (cfg) {
-                    page.querySelector('#Layout').value = cfg.Layout || 'Poster';
+                    page.querySelector('#Style').value = cfg.Style || 'Auto';
                     page.querySelector('#ExcludePatterns').value = cfg.ExcludePatterns || '';
-                    page.querySelector('#FontPath').value = cfg.FontPath || '';
-                    page.querySelector('#UpperCaseTitle').checked = cfg.UpperCaseTitle !== false;
                     Dashboard.hideLoadingMsg();
                 });
             });
@@ -69,10 +56,8 @@
                 e.preventDefault();
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (cfg) {
-                    cfg.Layout = page.querySelector('#Layout').value;
+                    cfg.Style = page.querySelector('#Style').value;
                     cfg.ExcludePatterns = page.querySelector('#ExcludePatterns').value;
-                    cfg.FontPath = page.querySelector('#FontPath').value;
-                    cfg.UpperCaseTitle = page.querySelector('#UpperCaseTitle').checked;
                     ApiClient.updatePluginConfiguration(pluginId, cfg).then(Dashboard.processPluginConfigurationUpdateResult);
                 });
                 return false;

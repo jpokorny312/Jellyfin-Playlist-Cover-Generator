@@ -1,116 +1,13 @@
 using Jellyfin.Plugin.PlaylistCovers;
 using SkiaSharp;
 
-// Renders sample covers from synthetic images (no Jellyfin needed): dotnet run --project Demo [outDir] [fontPath]
+// Renders sample covers from procedural stand-in posters (no Jellyfin needed):
+//   dotnet run --project Demo -c Release -- [outDir]
+// Writes cover_<style>_<n>.jpg, an overview sheet and a card_preview.jpg that mimics how the web UI shows the cards.
 var outDir = args.Length > 0 ? args[0] : "demo_out";
-var font = args.Length > 1 ? args[1] : null;
 Directory.CreateDirectory(outDir);
 
-SKBitmap Backdrop(SKColor a, SKColor b, int seed)
-{
-    var rnd = new Random(seed);
-    var bmp = new SKBitmap(1280, 720);
-    using var c = new SKCanvas(bmp);
-    using var shader = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(1280, 720), new[] { a, b }, SKShaderTileMode.Clamp);
-    using var p = new SKPaint { Shader = shader };
-    c.DrawRect(0, 0, 1280, 720, p);
-    for (var i = 0; i < 6; i++)
-    {
-        using var blob = new SKPaint { Color = new SKColor((byte)rnd.Next(30, 220), (byte)rnd.Next(30, 220), (byte)rnd.Next(30, 220)), ImageFilter = SKImageFilter.CreateBlur(30, 30) };
-        c.DrawCircle(rnd.Next(1280), rnd.Next(720), rnd.Next(80, 260), blob);
-    }
-    return bmp;
-}
-
-SKBitmap Logo(string text)
-{
-    var bmp = new SKBitmap(1100, 220);
-    using var c = new SKCanvas(bmp);
-    c.Clear(SKColors.Transparent);
-    using var f = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold), 90);
-    using var p = new SKPaint { Color = SKColors.White, IsAntialias = true };
-    c.DrawText(text, 20, 130, SKTextAlign.Left, f, p);
-    return bmp;
-}
-
-var samples = new (string Name, SKBitmap[] Bd, string[] Logos, int Movies, int Series)[]
-{
-    ("Marvel Filmreihe", new[] { Backdrop(new(200, 30, 30), new(20, 20, 80), 1), Backdrop(new(230, 160, 30), new(120, 20, 20), 2), Backdrop(new(20, 40, 120), new(200, 40, 60), 3) }, new[] { "IRON MAN", "THOR", "AVENGERS" }, 12, 0),
-    ("Weihnachtsklassiker", new[] { Backdrop(new(20, 110, 60), new(180, 30, 30), 4) }, new[] { "GRINCH", "HOME ALONE" }, 7, 0),
-    ("Krimi Serien Abend", new[] { Backdrop(new(20, 40, 70), new(10, 10, 20), 5), Backdrop(new(60, 70, 90), new(15, 25, 40), 6) }, new[] { "BROADCHURCH", "TRUE DETECTIVE", "LUTHER" }, 1, 5),
-    ("Sonntag Familienfilme mit der ganzen Bande", new[] { Backdrop(new(240, 170, 40), new(200, 90, 40), 7), Backdrop(new(40, 150, 220), new(20, 60, 140), 8) }, Array.Empty<string>(), 9, 1),
-};
-
-foreach (var s in samples)
-{
-    var logos = s.Logos.Select(Logo).ToList();
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-    var jpeg = CoverRenderer.RenderJpeg(s.Name, s.Bd, logos, s.Movies, s.Series, font);
-    var file = Path.Combine(outDir, s.Name.Replace(' ', '_') + ".jpg");
-    File.WriteAllBytes(file, jpeg);
-
-    using var full = SKBitmap.Decode(jpeg);
-    using var sq = new SKBitmap();
-    full.ExtractSubset(sq, new SKRectI((full.Width - full.Height) / 2, 0, (full.Width + full.Height) / 2, full.Height));
-    using var img = SKImage.FromBitmap(sq);
-    File.WriteAllBytes(file.Replace(".jpg", "_square.jpg"), img.Encode(SKEncodedImageFormat.Jpeg, 90).ToArray());
-    Console.WriteLine($"{file}  {sw.ElapsedMilliseconds} ms");
-}
-
-// ---- portrait 1:2 poster layout ----
-SKBitmap FakePoster(string name, SKColor top, SKColor bottom, int seed)
-{
-    var rnd = new Random(seed);
-    var bmp = new SKBitmap(600, 900);
-    using var c = new SKCanvas(bmp);
-    using var shader = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(0, 900), new[] { top, bottom }, SKShaderTileMode.Clamp);
-    using (var p = new SKPaint { Shader = shader }) { c.DrawRect(0, 0, 600, 900, p); }
-    using (var glow = new SKPaint { Color = new SKColor(255, 255, 255, 70), ImageFilter = SKImageFilter.CreateBlur(40, 40) })
-    {
-        c.DrawCircle(rnd.Next(150, 450), rnd.Next(250, 450), rnd.Next(90, 170), glow);
-    }
-    using var f = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold), 64);
-    using var t = new SKPaint { Color = SKColors.White, IsAntialias = true };
-    var y = 700;
-    foreach (var word in name.Split(' '))
-    {
-        c.DrawText(word, 40, y, SKTextAlign.Left, f, t);
-        y += 70;
-    }
-    return bmp;
-}
-
-var posterSets = new (string Name, string File, SKBitmap[] Posters, SKBitmap[] Bd, string[] Logos, int Movies, int Series)[]
-{
-    ("Marvel Filmreihe", "poster_marvel", new[]
-    {
-        FakePoster("IRON MAN", new(180, 20, 30), new(40, 10, 10), 11), FakePoster("THOR", new(30, 60, 150), new(10, 15, 50), 12),
-        FakePoster("AVENGERS", new(220, 150, 30), new(90, 30, 20), 13), FakePoster("BLACK PANTHER", new(60, 30, 110), new(15, 10, 35), 14),
-        FakePoster("DOCTOR STRANGE", new(150, 40, 120), new(40, 10, 40), 15),
-    }, new[] { Backdrop(new(200, 30, 30), new(20, 20, 80), 1) }, new[] { "IRON MAN", "THOR", "AVENGERS" }, 12, 0),
-    ("Krimi Serien Abend", "poster_krimi", new[]
-    {
-        FakePoster("LUTHER", new(40, 60, 80), new(10, 15, 25), 21), FakePoster("BROADCHURCH", new(70, 110, 120), new(15, 30, 35), 22),
-        FakePoster("TRUE DETECTIVE", new(110, 80, 40), new(30, 20, 10), 23),
-    }, Array.Empty<SKBitmap>(), new[] { "LUTHER", "BROADCHURCH" }, 1, 3),
-    ("Sonntag Familienfilme mit der ganzen Bande", "poster_familie", new[]
-    {
-        FakePoster("COCO", new(240, 140, 30), new(120, 40, 20), 31), FakePoster("UP", new(50, 150, 220), new(20, 60, 130), 32),
-    }, Array.Empty<SKBitmap>(), Array.Empty<string>(), 2, 0),
-};
-
-foreach (var s in posterSets)
-{
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-    var jpeg = CoverRenderer.RenderPosterJpeg(s.Name, s.Posters, s.Movies, s.Series, font);
-    var file = Path.Combine(outDir, s.File + ".jpg");
-    File.WriteAllBytes(file, jpeg);
-    Console.WriteLine($"{file}  {sw.ElapsedMilliseconds} ms");
-}
-
-// ---- text-free styles: wall / mosaic / hero ----
-// Procedural stand-ins for real posters: sky gradient, sun/moon, mountains, a figure, title lettering.
-SKBitmap FancyPoster(int i)
+SKBitmap FakePoster(int i)
 {
     string[] names = { "NACHTZUG", "SILBERFLUSS", "DER LETZTE SOMMER", "KOMET", "EISENHERZ", "STADT AUS GLAS", "WÜSTENFUCHS", "ROTE LATERNE", "TIEFSEE", "DAS ECHO", "FRÜHLINGSSTURM", "MONDSCHEIN" };
     SKColor[][] palettes =
@@ -157,39 +54,67 @@ SKBitmap FancyPoster(int i)
     return bmp;
 }
 
-var counts = new[] { ("viele Titel (12)", 12), ("mittel (5)", 5), ("wenige (2)", 2) };
-var styles = new[] { "wall", "mosaic", "hero" };
+var samples = new[] { (Label: "3 Titel", Count: 3), (Label: "5 Titel", Count: 5), (Label: "12 Titel", Count: 12) };
+var styles = new[] { "Hero", "Mosaic", "Wall" };
+var labels = new Dictionary<string, string> { ["Hero"] = "Held + Stapel", ["Mosaic"] = "Mosaik", ["Wall"] = "Poster-Wand" };
+
+// --- overview sheet: every style for every poster count ---
 const int cellW = 400, cellH = 600, pad = 24, labelH = 44;
-using var sheet = new SKBitmap(pad + (styles.Length * (cellW + pad)), labelH + pad + (counts.Length * (cellH + pad)) + pad);
-using (var sc = new SKCanvas(sheet))
+using var sheet = new SKBitmap(pad + (styles.Length * (cellW + pad)), labelH + pad + (samples.Length * (cellH + pad + 28)));
+using var sc = new SKCanvas(sheet);
+sc.Clear(new SKColor(24, 24, 28));
+using var lf = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold), 22);
+using var lp = new SKPaint { Color = new SKColor(230, 230, 235), IsAntialias = true };
+for (var si = 0; si < styles.Length; si++) { sc.DrawText(labels[styles[si]], pad + (si * (cellW + pad)), 36, SKTextAlign.Left, lf, lp); }
+
+var covers = new Dictionary<(string, int), SKBitmap>();
+for (var ri = 0; ri < samples.Length; ri++)
 {
-    sc.Clear(new SKColor(24, 24, 28));
-    using var lf = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold), 22);
-    using var lp = new SKPaint { Color = new SKColor(230, 230, 235), IsAntialias = true };
+    var posters = Enumerable.Range(0, samples[ri].Count).Select(FakePoster).ToList();
     for (var si = 0; si < styles.Length; si++)
     {
-        sc.DrawText(new[] { "A · Poster-Wand", "B · Mosaik", "C · Held + Stapel" }[si], pad + (si * (cellW + pad)), 36, SKTextAlign.Left, lf, lp);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var jpeg = CoverRenderer.RenderJpeg(posters, styles[si]);
+        File.WriteAllBytes(Path.Combine(outDir, $"cover_{styles[si].ToLowerInvariant()}_{samples[ri].Count}.jpg"), jpeg);
+        var cover = SKBitmap.Decode(jpeg);
+        covers[(styles[si], samples[ri].Count)] = cover;
+        using var img = SKImage.FromBitmap(cover);
+        var top = labelH + pad + (ri * (cellH + pad + 28));
+        sc.DrawImage(img, new SKRect(pad + (si * (cellW + pad)), top, pad + (si * (cellW + pad)) + cellW, top + cellH), new SKSamplingOptions(SKCubicResampler.Mitchell));
+        Console.WriteLine($"{styles[si],-7} {samples[ri].Count,2} posters -> {CoverRenderer.ResolveStyle(samples[ri].Count, styles[si]),-6} {sw.ElapsedMilliseconds} ms");
     }
 
-    for (var ri = 0; ri < counts.Length; ri++)
-    {
-        var posters = Enumerable.Range(0, counts[ri].Item2).Select(FancyPoster).ToList();
-        for (var si = 0; si < styles.Length; si++)
-        {
-            var jpeg = CoverRenderer.RenderStyledJpeg(posters, styles[si]);
-            File.WriteAllBytes(Path.Combine(outDir, $"style_{styles[si]}_{counts[ri].Item2}.jpg"), jpeg);
-            using var cover = SKBitmap.Decode(jpeg);
-            using var img = SKImage.FromBitmap(cover);
-            sc.DrawImage(img, new SKRect(pad + (si * (cellW + pad)), labelH + pad + (ri * (cellH + pad)), pad + (si * (cellW + pad)) + cellW, labelH + pad + (ri * (cellH + pad)) + cellH), new SKSamplingOptions(SKCubicResampler.Mitchell));
-        }
-
-        sc.DrawText(counts[ri].Item1, pad, labelH + pad + (ri * (cellH + pad)) + cellH + 18, SKTextAlign.Left, lf, lp);
-    }
+    sc.DrawText(samples[ri].Label, pad, labelH + pad + (ri * (cellH + pad + 28)) + cellH + 22, SKTextAlign.Left, lf, lp);
 }
 
-using (var si = SKImage.FromBitmap(sheet))
+using (var si = SKImage.FromBitmap(sheet)) { File.WriteAllBytes(Path.Combine(outDir, "styles_overview.jpg"), si.Encode(SKEncodedImageFormat.Jpeg, 90).ToArray()); }
+
+// --- card preview: the Auto style at the size Jellyfin's web UI shows it (≈300×450), with its overlays ---
+const int cw = 300, ch = 450, cgap = 40;
+var auto = new[] { 3, 5, 12 };
+using var card = new SKBitmap((auto.Length * (cw + cgap)) + cgap, ch + 120);
+using var cc = new SKCanvas(card);
+cc.Clear(new SKColor(22, 27, 40));
+using var small = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Normal), 20);
+using var white = new SKPaint { Color = new SKColor(210, 215, 225), IsAntialias = true };
+for (var k = 0; k < auto.Length; k++)
 {
-    File.WriteAllBytes(Path.Combine(outDir, "styles_overview.jpg"), si.Encode(SKEncodedImageFormat.Jpeg, 90).ToArray());
+    var x = cgap + (k * (cw + cgap));
+    var rect = new SKRect(x, 40, x + cw, 40 + ch);
+    var cover = covers[("Wall", auto[k])];
+    var resolved = CoverRenderer.ResolveStyle(auto[k], "Auto");
+    cover = covers[(resolved, auto[k])];
+    using var img = SKImage.FromBitmap(cover);
+    cc.Save();
+    cc.ClipRoundRect(new SKRoundRect(rect, 24), SKClipOperation.Intersect, true);
+    cc.DrawImage(img, rect, new SKSamplingOptions(SKCubicResampler.Mitchell));
+    using (var bar = new SKPaint { Color = new SKColor(20, 40, 55) }) { cc.DrawRect(x, rect.Bottom - 9, cw, 9, bar); }
+    using (var done = new SKPaint { Color = new SKColor(60, 150, 210) }) { cc.DrawRect(x, rect.Bottom - 9, 100, 9, done); }
+    cc.Restore();
+    using (var badge = new SKPaint { Color = new SKColor(40, 80, 190), IsAntialias = true }) { cc.DrawCircle(x + cw - 46, 40 + 44, 27, badge); }
+    using (var bf = new SKFont(SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold), 22)) { cc.DrawText(auto[k].ToString(), x + cw - 46, 40 + 52, SKTextAlign.Center, bf, new SKPaint { Color = SKColors.White, IsAntialias = true }); }
+    cc.DrawText("Playlist", x + (cw / 2f), 40 + ch + 36, SKTextAlign.Center, small, white);
 }
 
-Console.WriteLine("styles_overview.jpg written");
+using (var si = SKImage.FromBitmap(card)) { File.WriteAllBytes(Path.Combine(outDir, "card_preview.jpg"), si.Encode(SKEncodedImageFormat.Jpeg, 92).ToArray()); }
+Console.WriteLine("done");

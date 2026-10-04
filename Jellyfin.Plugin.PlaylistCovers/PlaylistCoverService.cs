@@ -100,13 +100,14 @@ public class PlaylistCoverService
             return;
         }
 
-        var usePoster = !string.Equals(config.Layout, "Landscape", StringComparison.OrdinalIgnoreCase);
-        var mainPaths = usePoster ? PickPosters(children, 4) : PickBackdrops(children, 3);
-        var logoPaths = usePoster ? new List<string>() : PickLogos(children, 3);
-        var movies = children.Count(c => c is Movie);
-        var series = children.Count(c => c is Series or Season or Episode);
+        var posterPaths = PickPosters(children, 12);
+        if (posterPaths.Count == 0)
+        {
+            _logger.LogDebug("Playlist Covers: {Name} has no posters, skipped", playlist.Name);
+            return;
+        }
 
-        var signature = Signature(playlist.Name, children, mainPaths, logoPaths, config, usePoster);
+        var signature = Signature(children, posterPaths, config.Style);
         var key = playlist.Id.ToString("N");
 
         // Also compare the image currently attached to the playlist: if something else
@@ -116,25 +117,25 @@ public class PlaylistCoverService
             return;
         }
 
-        var images = Load(mainPaths);
-        var logos = Load(logoPaths);
+        var posters = Load(posterPaths);
         try
         {
-            var jpeg = usePoster
-                ? CoverRenderer.RenderPosterJpeg(playlist.Name, images, movies, series, config.FontPath)
-                : CoverRenderer.RenderJpeg(playlist.Name, images, logos, movies, series, config.FontPath, config.UpperCaseTitle);
+            var jpeg = CoverRenderer.RenderJpeg(posters, config.Style);
             using var stream = new MemoryStream(jpeg);
             await _providerManager
                 .SaveImage(playlist, stream, "image/jpeg", ImageType.Primary, null, ct)
                 .ConfigureAwait(false);
             await playlist.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, ct).ConfigureAwait(false);
             state[key] = signature + "#" + ImageMarker(playlist);
-            _logger.LogInformation("Playlist Covers: cover updated for {Name} ({Layout})", playlist.Name, usePoster ? "poster" : "landscape");
+            _logger.LogInformation(
+                "Playlist Covers: cover updated for {Name} ({Style}, {Count} posters)",
+                playlist.Name,
+                CoverRenderer.ResolveStyle(posters.Count, config.Style),
+                posters.Count);
         }
         finally
         {
-            images.ForEach(b => b.Dispose());
-            logos.ForEach(b => b.Dispose());
+            posters.ForEach(b => b.Dispose());
         }
     }
 
@@ -167,16 +168,7 @@ public class PlaylistCoverService
         return info != null && !string.IsNullOrEmpty(info.Path) && File.Exists(info.Path) ? info.Path : null;
     }
 
-    /// <summary>Spreads the picks across the playlist so the cover is not just the first three titles.</summary>
-    private static List<string> PickBackdrops(List<BaseItem> items, int max)
-    {
-        var all = items.Select(i => FindImage(i, ImageType.Backdrop)).Where(p => p != null).Select(p => p!).Distinct().ToList();
-        return Spread(all, max);
-    }
-
-    private static List<string> PickLogos(List<BaseItem> items, int max) =>
-        items.Select(i => FindImage(i, ImageType.Logo)).Where(p => p != null).Select(p => p!).Distinct().Take(max).ToList();
-
+    /// <summary>Evenly spreads the picks over the playlist but keeps the first title first.</summary>
     private static List<string> Spread(List<string> all, int max)
     {
         if (all.Count <= max)
@@ -185,24 +177,6 @@ public class PlaylistCoverService
         }
 
         return Enumerable.Range(0, max).Select(i => all[i * (all.Count - 1) / (max - 1)]).ToList();
-    }
-
-    /// <summary>Image of the item itself, or of its season/series (episodes usually have none).</summary>
-    private static string? FindImage(BaseItem item, ImageType type)
-    {
-        BaseItem? current = item;
-        for (var depth = 0; current != null && depth < 4; depth++)
-        {
-            var info = current.GetImageInfo(type, 0);
-            if (info != null && !string.IsNullOrEmpty(info.Path) && File.Exists(info.Path))
-            {
-                return info.Path;
-            }
-
-            current = current.GetParent();
-        }
-
-        return null;
     }
 
     private List<SKBitmap> Load(IEnumerable<string> paths)
@@ -227,20 +201,16 @@ public class PlaylistCoverService
         return result;
     }
 
-    private static string Signature(string name, List<BaseItem> children, List<string> images, List<string> logos, PluginConfiguration cfg, bool poster)
+    private static string Signature(List<BaseItem> children, List<string> posters, string style)
     {
         var sb = new StringBuilder();
-        sb.Append("v2|").Append(poster ? "poster" : "landscape").Append('|').Append(name).Append('|').Append(cfg.FontPath);
-        if (!poster)
-        {
-            sb.Append('|').Append(cfg.UpperCaseTitle);
-        }
+        sb.Append("v3|").Append(style);
         foreach (var c in children.Take(200))
         {
             sb.Append('|').Append(c.Id.ToString("N"));
         }
 
-        foreach (var p in images.Concat(logos))
+        foreach (var p in posters)
         {
             sb.Append('|').Append(p).Append(':').Append(File.GetLastWriteTimeUtc(p).Ticks);
         }
